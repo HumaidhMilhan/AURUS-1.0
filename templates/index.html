@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RoverBuddy — AI Pet Companion Control Center</title>
+    
+    <!-- Google Fonts: Outfit (Clean, premium typography) -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome for sleek icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom Style Sheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- Server-injected config for browser voice -->
+    <script>
+        const WAKE_WORDS = {{ wake_words | tojson }};
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- HEADER BAR -->
+        <header class="glass-header">
+            <div class="brand">
+                <i class="fa-solid fa-robot brand-icon"></i>
+                <div class="brand-text">
+                    <h1>RoverBuddy</h1>
+                    <span class="subtext">AI Desktop Companion</span>
+                </div>
+            </div>
+            
+            <div class="status-panel">
+                <div class="status-badge connected" id="system-status">
+                    <span class="indicator-dot pulse"></span>
+                    <span class="status-lbl">Simulation Active</span>
+                </div>
+                <div class="status-badge mic-inactive" id="mic-status">
+                    <span class="indicator-dot"></span>
+                    <span class="mic-status-lbl">Mic Offline</span>
+                </div>
+                <div class="mode-selector" id="mode-selector">
+                    <button class="mode-btn active" data-mode="manual" onclick="setDriveMode('manual')" title="Manual Control">
+                        <i class="fa-solid fa-gamepad"></i>
+                        <span>Manual</span>
+                    </button>
+                    <button class="mode-btn" data-mode="autonomous" onclick="setDriveMode('autonomous')" title="Autonomous Exploration">
+                        <i class="fa-solid fa-compass"></i>
+                        <span>Explore</span>
+                    </button>
+                    <button class="mode-btn" data-mode="voice_command" onclick="setDriveMode('voice_command')" title="Voice Commands">
+                        <i class="fa-solid fa-microphone-lines"></i>
+                        <span>Voice</span>
+                    </button>
+                </div>
+                <div class="key-badge clickable" onclick="openConfigModal()">
+                    <i class="fa-solid fa-key"></i>
+                    <span>Gemini API Config</span>
+                </div>
+                <button class="estop-btn" id="estop-btn" onclick="triggerEStop()">
+                    <i class="fa-solid fa-circle-radiation"></i> E-STOP
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <main class="dashboard-grid">
+            
+            <!-- LEFT COLUMN: FEED & SIMULATION -->
+            <section class="dash-column left-column">
+                
+                <!-- LIVE FEED & SENSOR RADAR -->
+                <div class="glass-card feed-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-video card-icon"></i> Diagnostics & Proximity</h2>
+                        <span class="badge live-badge">LIVE FEED</span>
+                    </div>
+                    <div class="feed-split">
+                        <div class="camera-placeholder">
+                            <div class="glitch-overlay"></div>
+                            <i class="fa-solid fa-camera-retro cam-icon"></i>
+                            <span>Camera Feed Offline (Mock Active)</span>
+                        </div>
+                        <div class="radar-container">
+                            <canvas id="radar-canvas"></canvas>
+                            <span class="radar-label">Sonar Proximity (cm)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2D SIMULATION ROOM -->
+                <div class="glass-card sim-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-gamepad card-icon"></i> 2D Virtual Arena</h2>
+                        <div class="sim-actions">
+                            <button class="icon-btn" onclick="resetSim()" title="Reset Arena"><i class="fa-solid fa-rotate-left"></i></button>
+                            <span class="badge sim-badge">SIMULATOR</span>
+                        </div>
+                    </div>
+                    <div class="sim-canvas-wrapper">
+                        <canvas id="sim-canvas"></canvas>
+                        <div class="sim-controls-guide">
+                            <span>Use <strong>WASD</strong> to strafe, <strong>Q/E</strong> to rotate</span>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- RIGHT COLUMN: DIGITAL FACE & VOICE INTERACTION -->
+            <section class="dash-column right-column">
+                
+                <!-- ANIMATED DIGITAL FACE -->
+                <div class="glass-card face-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-smile-beam card-icon"></i> Active Expression</h2>
+                        <span class="expression-badge" id="current-expression">HAPPY</span>
+                    </div>
+                    <div class="face-canvas-wrapper">
+                        <canvas id="face-canvas" width="450" height="200"></canvas>
+                    </div>
+                    <div class="inner-thought-display" id="inner-thought-display">
+                        <i class="fa-solid fa-brain thought-icon"></i>
+                        <span id="inner-thought-text">...</span>
+                    </div>
+                </div>
+
+                <!-- EMOTION ENGINE METRICS -->
+                <div class="glass-card emotions-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-heart-pulse card-icon"></i> Emotional Engine Levels</h2>
+                    </div>
+                    <div class="metrics-grid">
+                        <div class="metric-slider-group">
+                            <div class="metric-info">
+                                <span class="metric-name"><i class="fa-solid fa-face-grin-tears happy-color"></i> Happiness</span>
+                                <span class="metric-value font-orbitron" id="val-happiness">50%</span>
+                            </div>
+                            <div class="metric-bar-bg">
+                                <div class="metric-bar-fill happy-bg" id="bar-happiness" style="width: 50%;"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="metric-slider-group">
+                            <div class="metric-info">
+                                <span class="metric-name"><i class="fa-solid fa-compass curious-color"></i> Curiosity</span>
+                                <span class="metric-value font-orbitron" id="val-curiosity">50%</span>
+                            </div>
+                            <div class="metric-bar-bg">
+                                <div class="metric-bar-fill curious-bg" id="bar-curiosity" style="width: 50%;"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="metric-slider-group">
+                            <div class="metric-info">
+                                <span class="metric-name"><i class="fa-solid fa-triangle-exclamation fear-color"></i> Fear Level</span>
+                                <span class="metric-value font-orbitron" id="val-fear">0%</span>
+                            </div>
+                            <div class="metric-bar-bg">
+                                <div class="metric-bar-fill fear-bg" id="bar-fear" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CHAT LOG & VOICE INTERACTION -->
+                <div class="glass-card chat-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-comments card-icon"></i> Conversation Terminal</h2>
+                        <button class="treat-btn" onclick="feedTreat()"><i class="fa-solid fa-cookie-bite"></i> Feed Treat</button>
+                    </div>
+                    <div class="chat-terminal" id="chat-terminal">
+                        <div class="chat-message system">
+                            <div class="msg-bubble">Rover initialized. Say "AURUS" to trigger voice.</div>
+                        </div>
+                    </div>
+                    <div class="input-actions-bar">
+                        <input type="text" id="chat-input" placeholder="Type a message to Rover..." onkeydown="handleInputKey(event)">
+                        <button class="send-btn" onclick="sendMessage()"><i class="fa-solid fa-paper-plane"></i></button>
+                        <button class="web-mic-btn" id="web-mic-btn" onclick="toggleWebMic()" title="Toggle browser microphone (say AURUS to trigger)">
+                            <i class="fa-solid fa-microphone" id="web-mic-icon"></i>
+                        </button>
+                    </div>
+                    <div class="web-mic-status" id="web-mic-status" style="display: none;">
+                        <span class="mic-listening-dot"></span>
+                        <span class="mic-transcript" id="mic-transcript">Listening for "AURUS"...</span>
+                    </div>
+                </div>
+
+                <!-- PRECISION STRAFE CONTROL PAD -->
+                <div class="glass-card control-pad-card" id="control-pad-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-circle-nodes card-icon"></i> Precision Strafe Control</h2>
+                        <span class="mode-indicator-badge" id="control-mode-badge">MANUAL</span>
+                    </div>
+                    <!-- Lock overlay shown when not in manual mode -->
+                    <div class="mode-lock-overlay" id="control-pad-lock" style="display: none;">
+                        <i class="fa-solid fa-lock"></i>
+                        <span>Switch to Manual Mode to use controls</span>
+                    </div>
+                    <div class="control-pad-layout">
+                        <div class="joystick-info">
+                            <span>Press & hold keys or click buttons below to pilot Rover omnidirectionally:</span>
+                        </div>
+                        <div class="speed-slider-container">
+                            <span class="speed-label"><i class="fa-solid fa-gauge-high"></i> Speed Limit: <strong id="speed-val">60%</strong></span>
+                            <input type="range" id="speed-multiplier" min="10" max="100" value="60" class="speed-range-slider" oninput="updateSpeedMultiplier(this.value)">
+                        </div>
+                        <div class="button-grid">
+                            <button class="pad-btn diagonal-btn" mousedown-cmd="diagonal_fl" title="Diagonal Forward-Left"><i class="fa-solid fa-arrow-up-left"></i></button>
+                            <button class="pad-btn action-btn" mousedown-cmd="forward" title="Forward"><i class="fa-solid fa-arrow-up"></i></button>
+                            <button class="pad-btn diagonal-btn" mousedown-cmd="diagonal_fr" title="Diagonal Forward-Right"><i class="fa-solid fa-arrow-up-right"></i></button>
+                            
+                            <button class="pad-btn action-btn" mousedown-cmd="strafe_left" title="Strafe Left"><i class="fa-solid fa-arrow-left"></i></button>
+                            <button class="pad-btn stop-btn" onclick="triggerStop()" title="Stop"><i class="fa-solid fa-circle"></i></button>
+                            <button class="pad-btn action-btn" mousedown-cmd="strafe_right" title="Strafe Right"><i class="fa-solid fa-arrow-right"></i></button>
+                            
+                            <button class="pad-btn spin-btn" mousedown-cmd="spin_left" title="Spin Left"><i class="fa-solid fa-rotate-left"></i></button>
+                            <button class="pad-btn action-btn" mousedown-cmd="backward" title="Backward"><i class="fa-solid fa-arrow-down"></i></button>
+                            <button class="pad-btn spin-btn" mousedown-cmd="spin_right" title="Spin Right"><i class="fa-solid fa-rotate-right"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+    </div>
+
+    <!-- CONFIGURATION MODAL (API KEY SETTING) -->
+    <div class="modal-overlay" id="config-modal">
+        <div class="glass-modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-gears modal-icon"></i> Gemini API Configurations</h3>
+                <button class="close-btn" onclick="closeConfigModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p>Provide a Google Gemini API Key to enable the advanced LLM persona engine. If empty, RoverBuddy runs using local fallback rules.</p>
+                <div class="form-group">
+                    <label for="gemini-key">Gemini API Key</label>
+                    <input type="password" id="gemini-key" placeholder="Enter AIzaSy... key">
+                </div>
+                <div class="modal-status" id="modal-status-msg"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" onclick="closeConfigModal()">Cancel</button>
+                <button class="save-btn" onclick="saveApiKey()">Save Configuration</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio assets for synthesizers (synthesized by browser API in JS if offline) -->
+    <audio id="beep-sound" src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAAA" preload="auto"></audio>
+
+    <!-- Socket.IO library and client logic scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/face.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
