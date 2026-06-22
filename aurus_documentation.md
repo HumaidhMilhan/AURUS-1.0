@@ -1,19 +1,20 @@
-# AURUS - System Overview & Documentation
+# AURUS V2 - System Overview & Documentation
 
 > [!NOTE]
-> This document provides a snapshot of the current AURUS codebase, covering core features, the technology stack, and hardware configurations. This is intended to serve as a reference before starting the new project rework.
+> This document provides a comprehensive snapshot of the AURUS V2 codebase following the major 10-Phase Upgrade. It covers core features, the expanded technology stack, and hardware configurations.
 
 ## 1. System Features
 
-The current AURUS codebase is designed as a voice-activated robotic pet dashboard and includes the following key features:
+The AURUS V2 codebase evolves the original robotic pet into a proactive, emotionally intelligent, and visually aware robotic companion. Key features include:
 
-- **Headless Wake-word Detection:** Uses the system microphone (via `PyAudio` and `SpeechRecognition`) to monitor for the wake-word **"AURUS"** in the background.
-- **Google AI Studio Native TTS:** Connects to the Gemini API (`google-genai`) to parse instructions, determine emotions/actions, and synthesize lifelike vocal responses natively.
-- **Headless Audio Playback:** Asynchronously plays back `.wav` responses using `aplay` (Linux) or `winsound` (Windows) depending on the environment.
-- **Emotional Mood Engine:** Continuously tracks and adjusts internal state variables (`Happiness`, `Curiosity`, `Fear`) using a background loop, which dynamically dictates autonomous behaviors such as wiggling, spinning, or retreating.
-- **Interactive 2D Simulator:** A robust software fallback simulating coordinate physics, Mecanum kinematics, and raycasted sonar. This enables full dashboard functionality and UI testing on non-hardware platforms (Windows/macOS) when `rpi-lgpio` is absent.
-- **Web UI Control Panel:** A glassmorphic, dark-mode web interface built on Flask-SocketIO. It displays real-time diagnostics, sonar radar sweeps, animated Canvas-based expressions, mood gauges, and allows manual control via a strafing pad.
-- **Autonomous & Voice-Command Modes:** Handles movement through manual UI input, autonomous environment exploration, or voice-directed commands (e.g., "Aurus, wiggle", "Aurus, show me a trick").
+- **Vision & Presence System (Computer Vision):** Uses OpenCV and MediaPipe for facial recognition to determine user presence ("Absent" vs "Present") and tracks bounding boxes for navigation. Incorporates MobileNet SSD for environmental object recognition.
+- **SQLite Conversation Memory:** Stores long-term conversation history locally in an SQLite database (`aurus_memory.db`), allowing AURUS to recall previous topics and synthesize daily summaries.
+- **Proactive Relationship Engine:** Expands the emotional model to track `Trust`, `Social Energy`, and `Relationship Strength`. AURUS dynamically decays these over time and can spontaneously initiate interactions (greetings, check-ins, or encouragements) based on human presence.
+- **Autonomous Follow Mode:** Uses a PID controller (`FollowController`) to automatically align and drive towards the user by combining visual face bounding boxes (for angle correction) and sonar proximity data (for distance maintenance).
+- **Explainable AI (XAI) Dashboard:** The UI features a real-time debugging panel that broadcasts the internal logic of the Gemini LLM. It displays the `Decision`, `Reason`, `Confidence`, and `Source Data` for every action.
+- **Demonstration Mode:** The UI includes an automated "Run Demo" button that simulates camera and voice inputs to showcase the full HRI workflow (Greeting -> Memory Recall -> Follow Mode -> Absence -> Daily Report).
+- **Google AI Studio Native TTS:** Connects to the Gemini API (`google-genai`) to parse instructions, manage the mood engine, and natively synthesize lifelike vocal responses.
+- **Interactive Web UI:** A glassmorphic control panel built on Flask-SocketIO. It displays real-time diagnostics, sonar radar sweeps, animated Canvas-based expressions, the live camera feed (or simulated object detection), XAI outputs, and allows manual control.
 
 ---
 
@@ -28,7 +29,9 @@ AURUS blends software simulation with edge-hardware execution, utilizing the fol
 ### **Backend Server & AI**
 - **Core Language:** Python 3
 - **Web Server:** Flask & Flask-SocketIO (with `eventlet` for async concurrency)
-- **AI Integration:** `google-genai` (for decision making, mood engine interactions, and native audio synthesis)
+- **AI Integration:** `google-genai` (for logic, conversation, and audio synthesis)
+- **Computer Vision:** `OpenCV` and `MediaPipe`
+- **Database:** `sqlite3`
 - **Audio Processing:** `SpeechRecognition` and `PyAudio`
 
 ### **Frontend & UI**
@@ -66,4 +69,4 @@ The robot utilizes 5 ultrasonic sensors mounted at different angles.
 - **Rear-Right (RR - -135°):** Trig = `GPIO 10`, Echo = `GPIO 11`
 
 ---
-*Created as part of the AURUS project codebase review and documentation effort.*
+*Updated for the AURUS V2 Upgrade.*

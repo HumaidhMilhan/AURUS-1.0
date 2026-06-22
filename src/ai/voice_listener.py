@@ -2,6 +2,14 @@ import time
 import threading
 import sys
 import ctypes
+import struct
+
+try:
+    import pyaudio
+    import numpy as np
+    HAS_AUDIO = True
+except ImportError:
+    HAS_AUDIO = False
 
 # Suppress ALSA warning messages from C-library (harmless but annoying on Raspberry Pi)
 try:
@@ -14,13 +22,17 @@ try:
 except Exception:
     pass
 
-# Try importing speech_recognition
 try:
-    import speech_recognition as sr
-    HAS_SR = True
+    import pvporcupine
+    HAS_PORCUPINE = True
 except ImportError:
-    HAS_SR = False
-    sr = None
+    HAS_PORCUPINE = False
+
+try:
+    from faster_whisper import WhisperModel
+    HAS_WHISPER = True
+except ImportError:
+    HAS_WHISPER = False
 
 from src import config
 
@@ -29,10 +41,24 @@ class VoiceListener:
         self.on_command_callback = on_command_callback
         self.running = False
         self.thread = None
-        self.has_hardware = HAS_SR
+        
+        self.has_hardware = HAS_PORCUPINE and HAS_WHISPER and HAS_AUDIO
         
         if not self.has_hardware:
-            print("[VoiceListener] WARNING: speech_recognition library is missing. Voice activation disabled.")
+            print("[VoiceListener] WARNING: pvporcupine, faster-whisper, or pyaudio missing. Voice activation disabled.")
+            return
+
+        self.porcupine = None
+        self.whisper_model = None
+        
+        try:
+            print(f"[VoiceListener] Loading Whisper model ({config.WHISPER_MODEL})...")
+            # Using int8 for faster CPU inference on Raspberry Pi
+            self.whisper_model = WhisperModel(config.WHISPER_MODEL, device="cpu", compute_type="int8")
+            print("[VoiceListener] Whisper model loaded successfully.")
+        except Exception as e:
+            print(f"[VoiceListener] ERROR: Failed to load Whisper: {e}")
+            self.has_hardware = False
 
     def start(self):
         if not self.has_hardware:
@@ -45,74 +71,100 @@ class VoiceListener:
 
     def stop(self):
         self.running = False
+        if self.porcupine:
+            self.porcupine.delete()
         print("[VoiceListener] Background listener stopped.")
 
     def _listen_loop(self):
-        r = sr.Recognizer()
-        
-        # Configure thresholds
-        r.dynamic_energy_threshold = True
-        r.pause_threshold = 0.8
-        
-        mic = None
-        try:
-            mic = sr.Microphone(device_index=config.MIC_INDEX)
-            # Test opening microphone
-            with mic as source:
-                r.adjust_for_ambient_noise(source, duration=1.0)
-            print(f"[VoiceListener] Microphone initialized successfully (Device Index: {config.MIC_INDEX}).")
-        except Exception as e:
-            print(f"[VoiceListener] ERROR: Failed to access microphone: {e}")
-            print("[VoiceListener] Running in mock-voice mode. Voice activation will not capture physical microphone.")
+        if not config.PORCUPINE_ACCESS_KEY:
+            print("[VoiceListener] ERROR: PORCUPINE_ACCESS_KEY not set in config.")
             self.running = False
             return
 
+        try:
+            # We use a built-in keyword for now since 'aurus' requires a custom trained .ppn file.
+            # You can replace this with keyword_paths=[path_to_aurus.ppn] if you have it.
+            keyword = "porcupine"
+            self.porcupine = pvporcupine.create(access_key=config.PORCUPINE_ACCESS_KEY, keywords=[keyword])
+        except Exception as e:
+            print(f"[VoiceListener] ERROR: Failed to init Porcupine: {e}")
+            self.running = False
+            return
+
+        pa = pyaudio.PyAudio()
+        try:
+            audio_stream = pa.open(
+                rate=self.porcupine.sample_rate,
+                channels=1,
+                format=pyaudio.paInt16,
+                input=True,
+                frames_per_buffer=self.porcupine.frame_length,
+                input_device_index=config.MIC_INDEX
+            )
+        except Exception as e:
+            print(f"[VoiceListener] ERROR: Failed to open microphone: {e}")
+            self.running = False
+            return
+
+        print(f"[VoiceListener] Listening for wake-word (currently set to '{keyword}' for testing)...")
+
         while self.running:
             try:
-                with mic as source:
-                    # Listen with 3s timeout and 10s maximum phrase limit
-                    print("[VoiceListener] Listening for wake-word 'AURUS'...")
-                    audio = r.listen(source, timeout=3.0, phrase_time_limit=8.0)
+                pcm = audio_stream.read(self.porcupine.frame_length, exception_on_overflow=False)
+                pcm_unpacked = struct.unpack_from("h" * self.porcupine.frame_length, pcm)
                 
-                print("[VoiceListener] Processing audio...")
-                # Recognize speech using free Google Web Speech API
-                try:
-                    text = r.recognize_google(audio).lower()
-                    print(f"[VoiceListener] Transcribed: \"{text}\"")
+                keyword_index = self.porcupine.process(pcm_unpacked)
+                
+                if keyword_index >= 0:
+                    print("[VoiceListener] WAKE-WORD DETECTED! Recording command...")
+                    self._record_and_transcribe(pa)
+                    # Re-print after transcription
+                    print(f"[VoiceListener] Listening for wake-word...")
                     
-                    # Detect wake-word
-                    wake_detected = False
-                    command = ""
-                    
-                    for wake in config.WAKE_WORDS:
-                        if wake in text:
-                            wake_detected = True
-                            # Extract everything after the wake-word as the command
-                            parts = text.split(wake, 1)
-                            if len(parts) > 1:
-                                command = parts[1].strip()
-                            break
-                    
-                    if wake_detected:
-                        print(f"[VoiceListener] WAKE-WORD DETECTED! Command: \"{command}\"")
-                        if self.on_command_callback:
-                            # Run callback in a separate thread to keep listener responsive
-                            threading.Thread(
-                                target=self.on_command_callback,
-                                args=(command,),
-                                daemon=True
-                            ).start()
-                            
-                except sr.UnknownValueError:
-                    # Audio was not clear enough to transcribe
-                    pass
-                except sr.RequestError as e:
-                    print(f"[VoiceListener] Google Speech Recognition service error: {e}")
-                    time.sleep(2.0)
-                    
-            except sr.WaitTimeoutError:
-                # No audio caught within timeout, loop again
-                continue
             except Exception as e:
-                print(f"[VoiceListener] Listener loop exception: {e}")
-                time.sleep(1.0)
+                print(f"[VoiceListener] Error in listen loop: {e}")
+                time.sleep(1)
+
+        audio_stream.close()
+        pa.terminate()
+
+    def _record_and_transcribe(self, pa):
+        # Record 3 seconds of audio after wake word
+        RECORD_SECONDS = 3
+        RATE = 16000
+        CHUNK = 1024
+        
+        try:
+            stream = pa.open(format=pyaudio.paInt16,
+                            channels=1,
+                            rate=RATE,
+                            input=True,
+                            frames_per_buffer=CHUNK,
+                            input_device_index=config.MIC_INDEX)
+            
+            frames = []
+            for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                frames.append(data)
+                
+            stream.close()
+            
+            # Convert to numpy array for faster-whisper (float32, -1.0 to 1.0)
+            audio_data = b''.join(frames)
+            audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+            
+            print("[VoiceListener] Transcribing with faster-whisper...")
+            segments, info = self.whisper_model.transcribe(audio_np, beam_size=1, language="en")
+            
+            text = "".join([segment.text for segment in segments]).strip()
+            print(f"[VoiceListener] Transcribed: \"{text}\"")
+            
+            if text and self.on_command_callback:
+                threading.Thread(
+                    target=self.on_command_callback,
+                    args=(text,),
+                    daemon=True
+                ).start()
+                
+        except Exception as e:
+            print(f"[VoiceListener] Failed to record/transcribe: {e}")

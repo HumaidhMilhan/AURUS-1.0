@@ -12,7 +12,9 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Puck")  # Choose from Aoede, Puck, Charon, Kore, Fenrir, etc.
 
 # --- Voice Recognition Settings ---
-WAKE_WORDS = ["aurus", "auras", "houris", "harris", "orris", "iris", "ouras", "aorist"]
+PORCUPINE_ACCESS_KEY = os.getenv("PORCUPINE_ACCESS_KEY", "")
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny.en")
+WAKE_WORDS = ["aurus"]
 MIC_INDEX = os.getenv("MIC_INDEX", None)
 if MIC_INDEX and MIC_INDEX.lower() not in ["none", "null"]:
     MIC_INDEX = int(MIC_INDEX)
@@ -81,21 +83,24 @@ SENSOR_ANGLE_RR = -3 * math.pi / 4  # Rear-Right: -135°
 # Decay rates per tick (1 tick = ~1 second)
 DECAY_HAPPINESS = 0.02
 DECAY_CURIOSITY = 0.03
-DECAY_FEAR = 0.05
+DECAY_SOCIAL_ENERGY = 0.01
 
-# Mood increments
+# Mood & Relationship increments
+INC_TRUST_POSITIVE = 0.05
+DEC_TRUST_IGNORED = 0.01
+INC_RELATIONSHIP_INTERACTION = 0.01
+
 INC_HAPPINESS_TREAT = 0.3
 INC_HAPPINESS_TALK = 0.15
 INC_CURIOSITY_MOVE = 0.1
 INC_CURIOSITY_SENSOR = 0.2
-INC_FEAR_COLLISION = 0.4
 
 # Proximity Alarm boundaries (in cm)
 PROXIMITY_ALARM_CM = 15.0
 PROXIMITY_ALERT_CM = 40.0
 
 # --- Drive Mode Constants ---
-DRIVE_MODES = ["manual", "autonomous", "voice_command"]
+DRIVE_MODES = ["manual", "autonomous", "voice_command", "mode_follow"]
 DEFAULT_DRIVE_MODE = "manual"
 
 # Autonomous exploration settings

@@ -1,8 +1,8 @@
-# RoverBuddy — AI Pet Companion & Assistant
+# RoverBuddy (AURUS V2) — AI Pet Companion & Assistant
 
-**RoverBuddy** is a voice-activated robotic pet dashboard running on a Raspberry Pi 4B under Raspbian OS (featuring a full virtual coordinate simulation fallback for Windows/macOS local testing).
+**RoverBuddy** is a voice-activated, visually-aware robotic pet dashboard running on a Raspberry Pi 4B under Raspbian OS (featuring a full virtual coordinate simulation fallback for Windows/macOS local testing).
 
-RoverBuddy listens headlessly for its wake-word (**"AURUS"**), queries the Gemini API for actions/emotions in JSON format, synthesizes lifelike responses using Google AI Studio native Text-to-Speech (TTS), and drives 4 Mecanum wheels to slide, spin, and express mood wiggles.
+With the **AURUS V2 Upgrade**, RoverBuddy listens headlessly for its wake-word (**"AURUS"**), queries the Gemini API for actions/emotions with Explainable AI metadata, utilizes OpenCV and MediaPipe for facial tracking and object recognition, stores conversational memories in SQLite, synthesizes lifelike responses using Google AI Studio native Text-to-Speech (TTS), and drives 4 Mecanum wheels to slide, spin, follow humans, and express mood wiggles.
 
 ---
 
@@ -11,33 +11,45 @@ RoverBuddy listens headlessly for its wake-word (**"AURUS"**), queries the Gemin
 ```
 /
 ├── config.py             # Hardware pins, Gemini settings, and mood decay rates
-├── motors.py             # Mecanum kinematics with simulated physics fallback
-├── sensors.py            # HC-SR04 sonar drivers with virtual room raycasting
-├── voice_listener.py     # Background mic listener looking for the hotword "AURUS"
-├── app.py                # Main Flask-SocketIO server and Emotional Mood Engine
-├── test_suite.py         # Locomotion & raycast unit tests
-├── requirements.txt      # Python dependencies (google-genai, SpeechRecognition, etc.)
+├── run.py                # Main entry point to launch the Flask server
+├── requirements.txt      # Python dependencies (google-genai, OpenCV, MediaPipe, etc.)
 ├── .env                  # Environmental configurations (Gemini API key, default voice)
-├── templates/
-│   └── index.html        # Glassmorphic dark-mode control panel
-└── static/
-    ├── css/
-    │   └── style.css     # Styling, custom scrollbars, animations, and gradients
-    └── js/
-        ├── face.js       # Animated HTML5 Canvas face rendering engine
-        └── app.js        # SocketIO events, keyboard binders, and arena draw loops
+├── src/
+│   ├── ai/
+│   │   ├── aurus_brain.py    # Memory DB, LLM prompting, and XAI local fallback
+│   │   └── intent_router.py  # Regex matching for specific commands (follow me, daily reports)
+│   ├── hardware/
+│   │   ├── motors.py         # Mecanum kinematics with simulated physics fallback
+│   │   └── sensors.py        # HC-SR04 sonar drivers with virtual room raycasting
+│   ├── vision/
+│   │   ├── vision_system.py  # OpenCV frame capture, MediaPipe Face, MobileNet SSD objects
+│   │   └── follow_controller.py # PID logic to translate face bounding boxes to motor speeds
+│   └── web/
+│       ├── app.py            # Main Flask-SocketIO server and Proactive Mood Engine
+│       ├── templates/
+│       │   └── index.html    # Glassmorphic dark-mode control panel
+│       └── static/
+│           ├── css/
+│           │   └── style.css # Styling, custom scrollbars, animations, and gradients
+│           └── js/
+│               ├── face.js   # Animated HTML5 Canvas face rendering engine
+│               └── app.js    # SocketIO events, keyboard binders, and arena draw loops
+└── tests/
+    └── test_suite.py     # Locomotion & raycast unit tests
 ```
 
 ---
 
 ## 2. Core Features Implemented
 
-1. **Headless Wake-word Detection:** Uses PyAudio and the `SpeechRecognition` library to monitor the system microphone. Transcription is handled via Google Speech Recognition, checking for the wake-word **AURUS** and capturing subsequent instructions.
-2. **Google AI Studio Native TTS:** Connects to the modern `google-genai` client, making a structured JSON query for text, emotion, and motion actions, then synthesizes WAV audio via Gemini's native `"audio"` modality using custom voices (e.g. `Puck`).
-3. **Headless Audio Playback:** Synthesized response files are written as `response.wav` and played asynchronously via `aplay` (on Linux) or `winsound` (on Windows).
-4. **Emotional Mood Engine:** Tracks `Happiness`, `Curiosity`, and `Fear` values in a background loop. Triggers safety escapes if obstacles are breached, sleeps when idle, and drives wiggles or curious visual spins autonomously.
-5. **Interactive 2D Simulator:** If RPi.GPIO is missing, the backend runs a virtual coordinate physical model. The dashboard draws the Rover chassis, Mecanum roller wheels, sonar raycasts, and custom circular obstacles inside a virtual room.
-6. **Web UI Control Panel:** A glassmorphic theme displaying diagnostics, a proximity sonar radar sweep, Canvas eye expressions, mood gauges, and a precision strafing pad.
+1. **Computer Vision & Presence:** Uses a camera feed with OpenCV and MediaPipe to detect humans ("Present" vs "Absent"). Uses MobileNet SSD to recognize environmental objects.
+2. **Conversation Memory (SQLite):** Stores interaction histories locally, allowing the AI to recall context and generate detailed "Daily Companion Reports".
+3. **Autonomous Follow Mode:** A PID controller tracks bounding box coordinates from the vision system, combining it with sonar data to follow a user while maintaining a safe distance.
+4. **Explainable AI (XAI):** Broadcasts its internal decision-making process (Reason, Confidence, Source Data) over WebSockets to be displayed in a live debug dashboard.
+5. **Headless Wake-word Detection:** Uses PyAudio and the `SpeechRecognition` library to monitor the system microphone for the wake-word **AURUS**.
+6. **Google AI Studio Native TTS:** Connects to the `google-genai` client, making a structured JSON query for text, emotion, and motion actions, then synthesizes WAV audio via Gemini's native `"audio"` modality using custom voices (e.g. `Puck`).
+7. **Proactive Relationship Engine:** Tracks `Happiness`, `Curiosity`, `Trust`, and `Social Energy`. Triggers spontaneous greetings or idle check-ins based on human presence and time spent alone.
+8. **Interactive Web UI:** A glassmorphic theme displaying live camera feeds, proximity sonar radar sweeps, Canvas eye expressions, mood gauges, XAI logs, a demonstration mode button, and a precision strafing pad.
 
 ---
 
@@ -72,7 +84,7 @@ pip install -r requirements.txt
 
 ### Run the Kinematic and Sensor Tests
 ```powershell
-python test_suite.py
+python tests/test_suite.py
 ```
 
 ### Start the Server
@@ -82,7 +94,7 @@ python test_suite.py
    ```
 2. Launch:
    ```powershell
-   python app.py
+   python run.py
    ```
 3. Open [http://localhost:5000](http://localhost:5000) in Chrome/Edge.
-4. Speak *"Aurus, wiggle"* or *"Aurus, show me a trick"* to test the microphone STT and TTS audio loops.
+4. Click the **Run Demo** button on the UI dashboard to simulate the full interaction loop, or speak *"Aurus, follow me"* to test the microphone integration!

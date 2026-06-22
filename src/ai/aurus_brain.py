@@ -12,6 +12,8 @@ import time
 import random
 import traceback
 from src import config
+from src.ai.intent_router import IntentRouter
+from src.memory.memory_manager import MemoryManager
 
 # --- THE SYSTEM PROMPT: AURUS Personality Core ---
 
@@ -57,7 +59,13 @@ You MUST respond with a valid JSON object:
     "speech": "Your spoken response (max 30 words, punchy and expressive)",
     "emotion": "happy" | "sad" | "curious" | "scared" | "listening",
     "action": "stop" | "wiggle" | "spin" | "forward" | "backward" | "strafe_left" | "strafe_right" | "shiver" | "nod" | "dance",
-    "inner_thought": "A brief private thought that reveals your alien perspective (max 15 words)"
+    "inner_thought": "A brief private thought that reveals your alien perspective (max 15 words)",
+    "xai": {
+        "decision": "Brief summary of what you decided to do and say",
+        "reason": "Why you made this decision based on context",
+        "confidence": "A percentage (e.g., '94%') of how confident you are in this response",
+        "source_data": "What data influenced this (e.g., 'User prompt + High Trust + Object: Laptop')"
+    }
 }
 
 ## RULES
@@ -79,7 +87,13 @@ Respond as JSON:
     "speech": "Your spontaneous observation (max 20 words)",
     "emotion": "happy" | "curious" | "sad",
     "action": "stop" | "wiggle" | "spin" | "nod",
-    "inner_thought": "Brief private reflection (max 12 words)"
+    "inner_thought": "Brief private reflection (max 12 words)",
+    "xai": {
+        "decision": "Summary of your idle behavior",
+        "reason": "Why you chose this topic",
+        "confidence": "e.g., '95%'",
+        "source_data": "What triggered this thought (e.g., 'Idle Timer + Room silence')"
+    }
 }
 """
 
@@ -144,9 +158,11 @@ def format_rover_state(rover_state, sensor_data):
 
     state_block = f"""
 [CURRENT BODY STATE]
-Mood: happiness={rover_state.get('happiness', 0.5):.2f}, curiosity={rover_state.get('curiosity', 0.5):.2f}, fear={rover_state.get('fear', 0.0):.2f}
+Mood: happiness={rover_state.get('happiness', 0.5):.2f}, curiosity={rover_state.get('curiosity', 0.5):.2f}
+Relationship: trust={rover_state.get('trust', 0.5):.2f}, social_energy={rover_state.get('social_energy', 1.0):.2f}, relationship_strength={rover_state.get('relationship_strength', 0.5):.2f}
 Expression: {rover_state.get('expression', 'happy')}
 Drive Mode: {rover_state.get('drive_mode', 'manual')}
+Presence State: {rover_state.get('presence_state', 'Absent')}
 Sensors — Front-Left: {sensor_data.get('fl', '?')}cm, Front: {sensor_data.get('f', '?')}cm, Front-Right: {sensor_data.get('fr', '?')}cm
 Sensors — Rear-Left: {sensor_data.get('rl', '?')}cm, Rear-Right: {sensor_data.get('rr', '?')}cm
 Uptime: {uptime_mins} minutes
@@ -251,6 +267,10 @@ class AURUSBrain:
         self.memory = ConversationMemory(max_turns=config.BRAIN_MEMORY_MAX_TURNS)
         self.last_idle_thought_time = time.time()
         self._start_time = time.time()
+        
+        # New Phase 1 and Phase 2 integrations
+        self.intent_router = IntentRouter()
+        self.long_term_memory = MemoryManager()
 
     def set_client(self, client):
         """Update the Gemini client (called when API key is configured at runtime)."""
@@ -269,6 +289,24 @@ class AURUSBrain:
         history = self.memory.get_formatted_context()
         if history != "[No prior conversation]":
             parts.append(f"\n[CONVERSATION HISTORY]\n{history}")
+
+        # Inject Long Term Memory (Phase 2)
+        try:
+            recent_events = self.long_term_memory.get_recent_events(3)
+            recent_memories = self.long_term_memory.get_recent_memories(3)
+            
+            memory_block = "[LONG TERM MEMORY]\n"
+            has_memories = False
+            if recent_memories:
+                memory_block += "Relevant Memories:\n- " + "\n- ".join(recent_memories) + "\n"
+                has_memories = True
+            if recent_events:
+                memory_block += "Recent Events:\n- " + "\n- ".join(recent_events) + "\n"
+                has_memories = True
+            if has_memories:
+                parts.append(memory_block)
+        except Exception as e:
+            print(f"[AURUSBrain] Warning: Memory DB not accessible: {e}")
 
         if extra_instructions:
             parts.append(f"\n[ADDITIONAL CONTEXT]\n{extra_instructions}")
@@ -332,6 +370,33 @@ class AURUSBrain:
         
         Returns: dict with keys: speech, emotion, action, inner_thought
         """
+        # Phase 1: Local Intent Routing (< 1 second response)
+        intent = self.intent_router.route(user_message)
+        
+        if intent["type"] == "local_movement":
+            return {
+                "speech": "Executing movement.",
+                "emotion": "happy",
+                "action": intent["action"],
+                "inner_thought": f"Local intent '{intent['action']}' engaged to save latency."
+            }
+        elif intent["type"] == "local_mode":
+            # For mode changes, we return action as stop but set a special speech pattern or we could handle differently.
+            # But we will let Gemini handle the conversation for modes unless hardware needs instant mode switch.
+            # Usually modes are just state changes, we can return a local response.
+            return {
+                "speech": f"Switching to {intent['mode']}.",
+                "emotion": "curious",
+                "action": "stop",
+                "inner_thought": f"Mode switch to '{intent['mode']}' requested locally."
+            }
+            
+        # Phase 2: Log Interaction
+        try:
+            self.long_term_memory.log_interaction("DefaultUser", "voice_command", user_message)
+        except Exception as e:
+            print(f"[AURUSBrain] Warning: Failed to log to memory DB: {e}")
+
         # Add user message to memory
         self.memory.add_user(user_message)
 
@@ -430,6 +495,57 @@ class AURUSBrain:
                 return result
 
         return random.choice(FALLBACK_TREAT)
+
+    def generate_initiative(self, initiative_type, rover_state, sensor_data):
+        """Generate a spontaneous conversation starter based on the initiative type."""
+        if not self.client:
+            return random.choice(FALLBACK_GREETINGS) if initiative_type == "greeting" else None
+            
+        full_system_prompt = self._build_full_prompt(rover_state, sensor_data)
+        
+        initiative_prompts = {
+            "greeting": "You just saw your human friend enter the room! Enthusiastically greet them unprompted.",
+            "check-in": "You have been sitting silently with your human for a while. Initiate a gentle check-in or idle observation.",
+            "encouragement": "Initiate an unprompted word of encouragement or positive reinforcement for your human."
+        }
+        
+        prompt = initiative_prompts.get(initiative_type, "Initiate an idle conversation with your human.")
+        prompt += "\n(Generate this as a spontaneous initiative, the user has not spoken to you yet. You are speaking first!)"
+        
+        result = self._call_gemini(prompt, full_system_prompt)
+        if result:
+            self.memory.add_interaction("", result["speech"])
+        return result
+
+    def generate_daily_summary(self, rover_state, sensor_data):
+        """Generates a summary of today's interactions and states."""
+        if not self.client:
+            return {
+                "speech": "I don't have connection to my Gemini core right now, but I've been running and observing things locally!",
+                "emotion": "happy",
+                "action": "stop"
+            }
+            
+        full_system_prompt = self._build_full_prompt(rover_state, sensor_data)
+        
+        # Prepare context from memory
+        memory_summary = self.get_memory_summary()
+        context_str = f"SYSTEM DATA FOR SUMMARY:\n"
+        context_str += f"- Uptime: {memory_summary['uptime_minutes']} minutes\n"
+        context_str += f"- Total conversation turns: {memory_summary['turn_count']}\n"
+        context_str += f"- Current Mood: {rover_state.get('expression', 'happy')}\n"
+        context_str += f"- Relationship Strength: {rover_state.get('relationship_strength', 0.5):.2f}\n"
+        context_str += "- Recent topics:\n"
+        for i, entry in enumerate(self.memory.history[-5:]):
+            if entry["role"] == "user":
+                context_str += f"  * User: {entry['parts'][0]}\n"
+                
+        prompt = f"The user asked for a daily companion report. Summarize the day's events, interactions, and your relationship status based on the following data:\n{context_str}\nProvide a friendly, conversational report."
+        
+        result = self._call_gemini(prompt, full_system_prompt)
+        if result:
+            self.memory.add_interaction("AURUS summarize today.", result["speech"])
+        return result
 
     def get_memory_summary(self):
         """Return a summary of the conversation memory for debugging."""

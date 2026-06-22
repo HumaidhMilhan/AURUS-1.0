@@ -227,6 +227,18 @@ socket.on('telemetry', (telemetry) => {
     if (telemetry.drive_mode && telemetry.drive_mode !== currentDriveMode) {
         updateModeUI(telemetry.drive_mode);
     }
+
+    // 8. Render detected objects
+    const objectsList = document.getElementById('detected-objects-list');
+    if (objectsList && telemetry.objects) {
+        if (telemetry.objects.length > 0) {
+            objectsList.innerHTML = telemetry.objects.map(obj => 
+                `<div><i class="fa-solid fa-crosshairs"></i> ${obj.label} (${Math.round(obj.confidence * 100)}%)</div>`
+            ).join('');
+        } else {
+            objectsList.innerHTML = '';
+        }
+    }
 });
 
 // --- Mode Change Events ---
@@ -247,6 +259,27 @@ socket.on('mode_conflict', (data) => {
 
 socket.on('mode_error', (data) => {
     appendChatMessage('System', `Mode error: ${data.message}`, 'system');
+});
+
+socket.on('xai_update', (data) => {
+    const decEl = document.getElementById('xai-decision');
+    const reaEl = document.getElementById('xai-reason');
+    const confEl = document.getElementById('xai-confidence');
+    const srcEl = document.getElementById('xai-source');
+    
+    if (decEl) decEl.textContent = data.decision || 'N/A';
+    if (reaEl) reaEl.textContent = data.reason || 'N/A';
+    if (confEl) confEl.textContent = data.confidence || 'N/A';
+    if (srcEl) srcEl.textContent = data.source_data || 'N/A';
+    
+    // Quick flash animation
+    const panel = document.getElementById('xai-panel');
+    if (panel) {
+        panel.style.boxShadow = '0 0 15px rgba(14, 165, 233, 0.4)';
+        setTimeout(() => {
+            panel.style.boxShadow = 'none';
+        }, 500);
+    }
 });
 
 socket.on('audio_trigger', (data) => {
@@ -572,6 +605,50 @@ function triggerStop() {
 function triggerEStop() {
     socket.emit('stop');
     appendChatMessage('System', 'EMERGENCY SHUTDOWN — All motors stopped. Reverted to Manual mode.', 'system');
+}
+
+// --- DEMONSTRATION MODE (PHASE 10) ---
+function startDemoSequence() {
+    appendChatMessage('System', 'Starting Demonstration Sequence...', 'system');
+    
+    // 1. User enters room (Presence -> Present)
+    setTimeout(() => {
+        appendChatMessage('System', '[Demo] Mocking Presence: Present', 'system');
+        socket.emit('demo_mock_presence', { state: 'Present' });
+    }, 2000);
+    
+    // 2. User asks question
+    setTimeout(() => {
+        appendChatMessage('You (Demo)', 'What is my name?', 'user');
+        socket.emit('user_talk', { message: 'What is my name?' });
+    }, 15000);
+    
+    // 3. User activates follow mode
+    setTimeout(() => {
+        appendChatMessage('You (Demo)', 'Follow me!', 'user');
+        socket.emit('user_talk', { message: 'Follow me!' });
+    }, 30000);
+    
+    // 4. User leaves room (Presence -> Absent)
+    setTimeout(() => {
+        appendChatMessage('System', '[Demo] Mocking Presence: Absent', 'system');
+        socket.emit('demo_mock_presence', { state: 'Absent' });
+        
+        // Return to manual mode after following
+        socket.emit('user_talk', { message: 'stop following' });
+    }, 45000);
+    
+    // 5. User requests summary
+    setTimeout(() => {
+        appendChatMessage('You (Demo)', 'AURUS summarize today', 'user');
+        socket.emit('user_talk', { message: 'AURUS summarize today' });
+        
+        // Reset mock
+        setTimeout(() => {
+            socket.emit('demo_mock_presence', { state: null });
+            appendChatMessage('System', 'Demonstration Sequence Complete.', 'system');
+        }, 20000);
+    }, 55000);
 }
 
 // Config Modal Handlers

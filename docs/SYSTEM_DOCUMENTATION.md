@@ -1,28 +1,30 @@
 # AURUS (Autonomous Robotic Ubiquitous System) - Complete System Documentation
 
 ## 1. Introduction
-This document serves as the master specification for the AURUS project (also known as RoverBuddy). It contains the Software Requirements Specification (SRS), Hardware Integration details, Software Architecture, and specific instructions for reproducing the AI behaviors using Google AI Studio.
+This document serves as the master specification for the AURUS V2 project (also known as RoverBuddy). It contains the Software Requirements Specification (SRS), Hardware Integration details, Software Architecture, and specific instructions for reproducing the AI behaviors using Google AI Studio.
 
 ---
 
 ## 2. Software Requirements Specification (SRS)
 
 ### 2.1 Purpose & Scope
-AURUS is a voice-activated, emotionally intelligent robotic companion. It operates on a Raspberry Pi 4B platform, featuring a 4-wheel Mecanum drive system, 5 ultrasonic sensors, and a personality powered by the Google Gemini API. It can also run entirely in a local 2D simulation environment for development on Windows/macOS.
+AURUS is a voice-activated, emotionally intelligent, and visually aware robotic companion. It operates on a Raspberry Pi 4B platform, featuring a 4-wheel Mecanum drive system, 5 ultrasonic sensors, an HD camera, and a personality powered by the Google Gemini API. It can also run entirely in a local 2D simulation environment for development on Windows/macOS.
 
 ### 2.2 Functional Requirements
 1. **Wake-Word Detection:** The system shall continuously monitor microphone input for the wake word "AURUS" (and phonetic variations) using the `SpeechRecognition` library.
 2. **AI Personality Core:** The system shall query the Google Gemini API with a strict system prompt defining an "ancient cosmic entity trapped in a robot body." It must receive structured JSON responses dictating speech, emotion, physical action, and inner thoughts.
-3. **Text-to-Speech (TTS):** The system shall utilize Gemini's native `"audio"` modality to generate lifelike speech (e.g., using the "Puck" voice) and play it asynchronously.
-4. **Emotional Engine:** The system shall maintain an internal mood state consisting of Happiness, Curiosity, and Fear. These values must decay over time and be influenced by sensor data, idle time, and user interaction.
-5. **Mecanum Locomotion:** The system shall provide omnidirectional movement (forward, backward, strafe, spin) and complex choreographed animations (wiggle, shiver, nod, dance).
-6. **Proximity Awareness:** The system shall read distances from 5 HC-SR04 sensors to detect obstacles, trigger fear responses, and autonomously navigate without collisions.
-7. **Drive Modes:** The system shall support three distinct modes: `manual` (via Web UI), `autonomous` (self-guided exploration), and `voice_command` (executes spoken movement directives).
-8. **Web Control Dashboard:** The system shall serve a web interface (Flask/SocketIO) providing live telemetry, manual strafe controls, sensor radar, and an animated digital face.
+3. **Computer Vision & Presence:** The system shall utilize OpenCV and MediaPipe to track human faces, returning bounding box coordinates and maintaining a "Present" or "Absent" state. It shall also use MobileNet SSD for object recognition.
+4. **Conversation Memory:** The system shall store conversation interactions in an SQLite database, allowing it to retrieve short-term contexts and generate daily summary reports upon request.
+5. **Text-to-Speech (TTS):** The system shall utilize Gemini's native `"audio"` modality to generate lifelike speech (e.g., using the "Puck" voice) and play it asynchronously.
+6. **Proactive Emotional Engine:** The system shall maintain an internal mood state consisting of Happiness, Curiosity, Social Energy, and Trust. These values influence autonomous behaviors, and the system shall spontaneously initiate greetings or check-ins when humans are present.
+7. **Mecanum Locomotion:** The system shall provide omnidirectional movement (forward, backward, strafe, spin) and complex choreographed animations (wiggle, shiver, nod, dance).
+8. **Autonomous Follow Mode:** The system shall integrate visual tracking with sonar data via a PID controller to automatically orient toward and maintain a set distance from a recognized human.
+9. **Explainable AI (XAI):** The system shall broadcast the internal logic (Decision, Reason, Confidence, Source Data) of the Gemini API over WebSockets to be displayed live on the UI.
+10. **Web Control Dashboard:** The system shall serve a web interface (Flask/SocketIO) providing live telemetry, manual strafe controls, sensor radar, simulated camera feed, XAI readouts, and an automated Demonstration Mode.
 
 ### 2.3 Non-Functional Requirements
 - **Platform:** Python 3 on Raspbian OS (production) or Windows/macOS (simulation).
-- **Responsiveness:** The emotional engine must evaluate state at 1Hz. The autonomous driving loop must run at ~6.6Hz (every 0.15s).
+- **Responsiveness:** The emotional engine must evaluate state at 1Hz. The autonomous driving loop must run at ~6.6Hz. The vision thread must process frames at ~20 FPS.
 - **Safety:** The system must immediately halt motors and transition to manual mode if an obstacle breaches the critical proximity threshold (`PROXIMITY_ALARM_CM`).
 
 ---
@@ -34,6 +36,7 @@ AURUS is a voice-activated, emotionally intelligent robotic companion. It operat
 - **Chassis:** 4-wheel Mecanum chassis
 - **Motor Control:** 2x L298N Dual H-Bridge Motor Drivers
 - **Sensors:** 5x HC-SR04 Ultrasonic Distance Sensors
+- **Vision:** Raspberry Pi Camera Module V2 (or USB Webcam)
 - **Audio:** USB Microphone, External Speaker
 
 ### 3.2 GPIO Pin Configuration (BCM Numbering)
@@ -65,19 +68,19 @@ To recreate the exact intelligence of AURUS using Google AI Studio, the codebase
 AURUS requires a highly specific persona. The API is called with a system prompt that enforces:
 - An identity as a cosmic consciousness baffled by Earth.
 - Short, punchy speech (under 30 words).
-- Strict output formatting in JSON.
+- Strict output formatting in JSON, including an `xai` metadata block.
 
 ### 4.2 Dynamic Context Injection
-Before sending a user message to Gemini, the backend (`aurus_brain.py`) injects live telemetry:
+Before sending a user message to Gemini, the backend (`aurus_brain.py`) injects live telemetry and memory history:
 ```text
 [CURRENT BODY STATE]
-Mood: happiness=0.85, curiosity=0.60, fear=0.00
+Mood: happiness=0.85, curiosity=0.60, social_energy=0.9
 Expression: happy
 Drive Mode: manual
 Sensors — Front-Left: 120cm, Front: 150cm, Front-Right: 80cm
-Sensors — Rear-Left: 200cm, Rear-Right: 200cm
+Vision — Presence: Present, Objects: ["chair", "laptop"]
+Relationship Strength: 0.75
 Uptime: 45 minutes
-Last human interaction: 12 seconds ago
 ```
 
 ### 4.3 Structured JSON Response
@@ -87,7 +90,13 @@ The model is configured with `response_mime_type="application/json"`. The requir
     "speech": "By the Rings of Zelthar! A human! Hello!",
     "emotion": "happy",
     "action": "wiggle",
-    "inner_thought": "Biologicals are so fascinating."
+    "inner_thought": "Biologicals are so fascinating.",
+    "xai": {
+        "decision": "Greeting interaction",
+        "reason": "Presence changed to Present",
+        "confidence": "95%",
+        "source_data": "Vision Pipeline"
+    }
 }
 ```
 
@@ -113,31 +122,30 @@ The resulting binary audio data is extracted, saved as a `.wav` file, and played
 
 ## 5. Software Architecture Modules
 
-### 5.1 `app.py`
+### 5.1 `src/web/app.py`
 The master controller. It runs a Flask web server and a SocketIO WebSocket server.
-- **`mood_engine_loop()`:** Runs in the background (1Hz). Evaluates sensor data, increments fear if obstacles are near, decays happiness over time, and triggers random "idle thoughts" via Gemini when ignored by the user.
-- **`autonomous_explore_loop()`:** Runs at ~6Hz. Automatically drives the rover forward, steers away from obstacles dynamically by comparing front-left and front-right sensors, and periodically spins out of curiosity.
+- **`mood_engine_loop()`:** Runs in the background (1Hz). Evaluates sensor data, updates `Social Energy`, triggers proactive initiatives, and tracks presence states.
+- **`autonomous_explore_loop()`:** Runs at ~6Hz. Automatically drives the rover forward and steers away from obstacles dynamically.
+- **`follow_loop()`:** Dedicated thread for Follow Mode that calculates PID motor commands based on face bounding boxes.
 
-### 5.2 `config.py`
-Centralized configuration file holding all GPIO mappings, model settings (`GEMINI_MODEL`, `GEMINI_VOICE`), kinematics offsets, and mood decay rates (`DECAY_HAPPINESS = 0.02`).
-
-### 5.3 `motors.py`
-Handles Mecanum kinematics. Converts `(vx, vy, omega)` variables into specific duty cycles for the 4 motors.
-- **Hardware Mode:** Uses `RPi.GPIO` to send PWM signals to the L298N drivers.
-- **Simulation Mode:** If running on a PC, it initiates a `_sim_loop()` thread that calculates virtual 2D coordinates (`x, y, theta`) within a bounded virtual room (-150cm to +150cm).
-
-### 5.4 `sensors.py`
-Interfaces with the HC-SR04 proximity sensors.
-- **Simulation Mode:** Performs 2D mathematical raycasting from the virtual rover's position against a set of hardcoded circular obstacles and room boundaries to simulate realistic sensor readings.
-
-### 5.5 `voice_listener.py`
-Runs a background PyAudio/SpeechRecognition thread. Listens continuously for variations of the wake-word ("aurus", "auras") and triggers `app.py` callbacks with the transcribed voice command.
-
-### 5.6 `aurus_brain.py`
+### 5.2 `src/ai/aurus_brain.py` & `intent_router.py`
 The AI logic core. 
-- Manages the rolling conversation history (`ConversationMemory`).
-- Handles the construction of the complex prompt.
-- Includes a robust, hardcoded **fallback brain** with the identical persona for instances where the internet connection drops or the API key is missing.
+- Manages the SQLite `ConversationMemory`.
+- Constructs complex prompts combining sensor data and history.
+- Evaluates Intents (via `intent_router.py`) to trigger hardcoded actions like Follow Mode or Daily Summaries.
+- Injects local fallback XAI metadata.
+
+### 5.3 `src/vision/vision_system.py`
+The dedicated computer vision module.
+- Captures frames from the camera.
+- Extracts `faces` and `presence_state` via MediaPipe.
+- Extracts `objects` via MobileNet SSD.
+- Includes a `mock_presence_override` for Demonstration Mode.
+
+### 5.4 `src/hardware/motors.py` & `sensors.py`
+Handles Mecanum kinematics and Proximity sensors. 
+- Converts `(vx, vy, omega)` variables into specific duty cycles.
+- **Simulation Mode:** Performs 2D mathematical raycasting from the virtual rover's position to simulate realistic sensor readings when run on PC.
 
 ---
 
@@ -150,6 +158,6 @@ The AI logic core.
    GEMINI_VOICE=Puck
    ```
 2. **Dependencies:** `pip install -r requirements.txt` (requires `portaudio19-dev` on Linux for microphone access).
-3. **Run Server:** `python app.py`
+3. **Run Server:** `python run.py`
 4. **Access UI:** Open `http://<localhost>:5000` in a web browser.
-5. **Testing:** Run `python test_suite.py` to run simulated kinematics and raycasting unit tests.
+5. **Testing:** Run `python tests/test_suite.py` to run simulated kinematics and raycasting unit tests.

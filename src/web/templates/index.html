@@ -73,14 +73,16 @@
                 <!-- LIVE FEED & SENSOR RADAR -->
                 <div class="glass-card feed-card">
                     <div class="card-header">
-                        <h2><i class="fa-solid fa-video card-icon"></i> Diagnostics & Proximity</h2>
-                        <span class="badge live-badge">LIVE FEED</span>
+                        <h2><i class="fa-solid fa-camera-retro card-icon"></i> Diagnostics & Proximity</h2>
+                        <span class="status-badge connected" id="system-status"><span class="status-lbl">Simulation Mode</span></span>
+                        <button class="treat-btn" onclick="startDemoSequence()" style="margin-left: 10px; background-color: #f59e0b;"><i class="fa-solid fa-play"></i> Run Demo</button>
                     </div>
                     <div class="feed-split">
                         <div class="camera-placeholder">
                             <div class="glitch-overlay"></div>
                             <i class="fa-solid fa-camera-retro cam-icon"></i>
                             <span>Camera Feed Offline (Mock Active)</span>
+                            <div class="detected-objects" id="detected-objects-list" style="margin-top: 15px; font-size: 0.9em; color: #00ffcc; text-align: left;"></div>
                         </div>
                         <div class="radar-container">
                             <canvas id="radar-canvas"></canvas>
@@ -103,6 +105,20 @@
                         <div class="sim-controls-guide">
                             <span>Use <strong>WASD</strong> to strafe, <strong>Q/E</strong> to rotate</span>
                         </div>
+                    </div>
+                </div>
+
+                <!-- EXPLAINABLE AI PANEL -->
+                <div class="glass-card xai-card" id="xai-panel">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-microchip card-icon"></i> Explainable AI (XAI)</h2>
+                        <span class="status-badge connected" style="font-size: 0.6em; background: rgba(14,165,233,0.2); color: #0ea5e9;">Live Debug</span>
+                    </div>
+                    <div class="xai-content" style="padding: 15px; font-family: 'Courier New', Courier, monospace; font-size: 0.9em; color: #a1a1aa; line-height: 1.5;">
+                        <div style="margin-bottom: 8px;"><strong style="color:#0ea5e9;">Decision:</strong> <span id="xai-decision">Waiting for autonomous action...</span></div>
+                        <div style="margin-bottom: 8px;"><strong style="color:#8b5cf6;">Reason:</strong> <span id="xai-reason">N/A</span></div>
+                        <div style="margin-bottom: 8px;"><strong style="color:#10b981;">Confidence:</strong> <span id="xai-confidence">N/A</span></div>
+                        <div><strong style="color:#f59e0b;">Source Data:</strong> <span id="xai-source">N/A</span></div>
                     </div>
                 </div>
 

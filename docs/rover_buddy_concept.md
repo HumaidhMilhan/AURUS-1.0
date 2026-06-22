@@ -1,5 +1,5 @@
-# RoverBuddy — AI Pet Companion & Assistant
-> **A lively, expressive desktop companion powered by Raspberry Pi 4B, Mecanum wheels, and the Gemini API.**
+# RoverBuddy (AURUS V2) — AI Pet Companion & Assistant
+> **A lively, expressive desktop companion powered by Raspberry Pi 4B, Mecanum wheels, Computer Vision, and the Gemini API.**
 
 ---
 
@@ -7,13 +7,13 @@
 
 **RoverBuddy** transforms a standard 4-wheel robot car into a living, responsive desktop pet. Instead of moving in simple linear paths, it uses **Mecanum wheels** to slide sideways, tilt, and express excitement, curiosity, or caution. 
 
-By running a web app that features an **animated digital face**, RoverBuddy can be mounted with a smartphone, giving it eyes that blink, look around, and react to its environment. When spoken to using its wake-word (*"Hey Rover"*), it queries the Gemini API under a custom pet persona, returning responses that simultaneously dictate its speech, facial expressions, and physical movements.
+With the massive **V2 Upgrade**, RoverBuddy now boasts a proactive relationship engine, an SQLite long-term memory system, real-time facial and object recognition, and an Explainable AI (XAI) dashboard to understand its thought process.
 
 ```
        ┌───────────────────────────┐
-       │     Smartphone Screen     │   ◄── Displays Rover's eyes/mouth (face.js)
+       │     Smartphone Screen     │   ◄── Displays Rover's eyes/mouth & UI Dashboard
        ├───────────────────────────┤
-       │      Raspberry Pi 4       │   ◄── Processes sensors, streams camera, runs TTS
+       │      Raspberry Pi 4       │   ◄── Processes sensors, streams camera, runs CV/TTS
        ├───────────────────────────┤
        │  2x L298N Motor Drivers   │   ◄── Drive 4x DC motors independently
        └─────────┬───────┬─────────┘
@@ -34,79 +34,53 @@ Unlike standard wheels, Mecanum wheels have rollers angled at 45° around their 
 | **Backward** | ⇩ Backward | ⇩ Backward | ⇩ Backward | ⇩ Backward |
 | **Strafe Left** | ⇩ Backward | ⇧ Forward | ⇧ Forward | ⇩ Backward |
 | **Strafe Right** | ⇧ Forward | ⇩ Backward | ⇩ Backward | ⇧ Forward |
-| **Diagonal F-L** | ◯ Stop | ⇧ Forward | ⇧ Forward | ◯ Stop |
-| **Diagonal F-R** | ⇧ Forward | ◯ Stop | ◯ Stop | ⇧ Forward |
 | **Spin Left** | ⇩ Backward | ⇧ Forward | ⇩ Backward | ⇧ Forward |
 | **Spin Right** | ⇧ Forward | ⇩ Backward | ⇧ Forward | ⇩ Backward |
 
-### 2x L298N Wiring Configuration
-To control all 4 wheels independently, we use **two L298N drivers**. Each driver handles two motors.
-
-```
-                  ┌──────────────────────┐
-                  │   Raspberry Pi 4B    │
-                  └─┬──────┬──────┬──────┘
-       L298N #1     │      │      │     L298N #2
-     (Left Wheels)  ▼      ▼      ▼   (Right Wheels)
-     ┌──────────────┐            ┌──────────────┐
-     │ ENA, IN1-2   │            │ ENB, IN3-4   │   ◄── Front Motors
-     │ ENB, IN3-4   │            │ ENA, IN1-2   │   ◄── Rear Motors
-     └─┬──────────┬─┘            └─┬──────────┬─┘
-       ▼          ▼                ▼          ▼
-    Motor      Motor            Motor      Motor
-  Front-Left Rear-Left       Front-Right Rear-Right
-```
-
 ---
 
-## 3. The Emotional Engine
+## 3. The Emotional & Proactive Engine
 
-RoverBuddy keeps track of three main internal mood variables (ranging from `0.0` to `1.0`) in a background process:
+RoverBuddy keeps track of internal mood variables (ranging from `0.0` to `1.0`) in a background process, ensuring it acts like a living creature rather than a passive assistant:
 
 ```mermaid
 graph TD
-    A[Idle State] -->|No interactions for 2 min| B(Boredom/Sleepy)
-    C[Sensor Triggers] -->|Obstacle < 15cm| D(Scared)
-    C -->|Obstacle 15-40cm| E(Curious)
-    F[User Interaction] -->|Voice commands / treats| G(Happy)
-    
-    B -->|Blinks slowly, lowers speed| H[Sleep State]
-    D -->|Executes fast reverse & shivers| I[Alarm State]
-    E -->|Slow approach, side-strafing| J[Explore State]
-    G -->|Happy chirps, wiggles body| K[Play State]
+    A[Idle State] -->|Human Enters Room| B(Greeting Initiative)
+    A -->|Human Ignores Rover| C(Check-In Initiative)
+    A -->|Left Alone for hours| D(Sleepy/Social Energy Recharges)
+    E[Sensor Triggers] -->|Obstacle < 15cm| F(Scared & Hardware Override)
+    G[User Interaction] -->|Voice commands / treats| H(Happy & Relationship++)
 ```
 
 ### Mood Metrics
 1.  **Happiness (Joy):** Increased by feeding treats or speaking to it. Decays slowly.
-    *   *High (>0.7):* Wiggles frequently, makes high-pitched chirps, eyes are happy crescent shapes.
-    *   *Low (<0.3):* Whimpers, moves slower, eyes droop.
 2.  **Curiosity (Alertness):** Increased by sensor activity (seeing objects move past).
-    *   *High (>0.6):* Explores autonomously, tilts its camera up/down, looks side-to-side.
-3.  **Fear (Startle Response):** Triggered by rear triggers or extreme sudden proximity blocks.
-    *   *High (>0.8):* Screeches stop, executes a fast backup wiggle, and shivers.
+3.  **Social Energy:** Depleted by interaction, recharged when alone. Prevents the bot from being overly annoying.
+4.  **Relationship Strength:** Grows over days of positive interactions, logged in the database.
 
 ---
 
-## 4. AI-Coordinated Interaction
+## 4. AI-Coordinated Interaction & Vision
 
-RoverBuddy uses the **Google Gemini API** to generate responses. By setting the API response format to JSON, RoverBuddy's mind directly drives its body.
+RoverBuddy uses the **Google Gemini API** combined with local **MediaPipe** vision to generate responses. 
 
-### Example Exchange
+### Computer Vision
+The robot continuously scans its environment:
+- **Presence Tracking:** Determines if a human is in the room ("Present" vs "Absent") to trigger greetings or sleep states.
+- **Follow Mode:** Computes X/Y bounding boxes to calculate the precise angle needed to pivot the robot, while using Sonar ping distance to approach and maintain a 40cm gap from the human.
 
-*   **User says:** *"Hey Rover, are you awake? Can you show me a trick?"*
-*   **Gemini API output:**
-    ```json
-    {
-      "speech": "Beep boop! Fully charged and ready! Watch this sideways slide!",
-      "emotion": "happy",
-      "action": "spin"
-    }
-    ```
-*   **Robot Execution:**
-    1.  Plays a happy synth sweep.
-    2.  TTS Engine speaks: *"Beep boop! Fully charged and ready! Watch this sideways slide!"*
-    3.  Face Canvas changes to blinking green circle eyes.
-    4.  Mecanum driver executes a continuous orbital spin for 1.5 seconds.
+### Example Exchange & XAI
+
+*   **User says:** *"Hey Rover, follow me!"*
+*   **System Action:**
+    1.  The **Intent Router** detects the regex `follow me`.
+    2.  The API is bypassed, and the state switches to `mode_follow`.
+    3.  The **Follow Loop** takes over the motors.
+    4.  The **Explainable AI (XAI)** dashboard flashes:
+        *   `Decision: Action: FOLLOW_START`
+        *   `Reason: Follow Intent Detected`
+        *   `Confidence: 98%`
+        *   `Source Data: User: follow me!`
 
 ---
 
@@ -116,38 +90,31 @@ The interface offers a responsive, glassmorphic dark-mode control center:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ 🤖 RoverBuddy UI       [Status: Connected]   [E-STOP]    │
+│ 🤖 RoverBuddy UI       [Simulation Mode]     [Run Demo]  │
 ├───────────────────────┬──────────────────────────────────┤
-│                       │  📋 CHAT & VOICE                 │
+│                       │  📋 ACTIVE EXPRESSION            │
 │  📷 LIVE CAMERA FEED  │  ┌────────────────────────────┐  │
-│  ┌─────────────────┐  │  │ User: Hey Rover!           │  │
-│  │                 │  │  ├────────────────────────────┤  │
-│  └─────────────────┘  │  │ Rover: Beep! Hello friend! │  │
+│  [ Mock Feed Active ] │  │  (👁️)      (👁️)            │  │
 │                       │  └────────────────────────────┘  │
-│  📡 PROXIMITY RADAR   │  🎙️ [Tap to Speak (Wake Word)]    │
-│       (Front)         ├──────────────────────────────────┤
-│     \    |    /       │  ⚡ PRECISION STRAFE CONTROLS    │
-│   (FL)  (F)  (FR)     │          ( Strafe Pad )          │
-│                       │          ▲  Up-Left            │
-│  (RL)         (RR)    │      ◀ ─ ┼ ─ ▶  Left/Right     │
-│     \         /       │          ▼  Down-Right         │
-│      (Rear)           │                                  │
+│  🧠 XAI DEBUG PANEL   │                                  │
+│  Decision: Greeting   │  📊 EMOTIONAL ENGINE             │
+│  Reason: Presence     │  [======= ] Happiness 50%        │
+│                       │  [========] Curiosity 60%        │
+│                       │                                  │
+│  🕹️ VIRTUAL ARENA     │  ⚡ CHAT & MANUAL CONTROLS       │
+│  [ Top-Down Map ]     │     [ Strafe Pad ]               │
 └───────────────────────┴──────────────────────────────────┘
 ```
 
 ---
 
-## 6. Project Roadmap
+## 6. Project Roadmap (V2 Update)
 
-1.  **Phase 1: Basic Locomotion & Simulation Core**
-    *   Install backend dependencies (Flask, SocketIO, pyttsx3).
-    *   Implement 4-wheel Mecanum motor logic in `motors.py` with mock simulation fallback.
-2.  **Phase 2: Animated Canvas Face & Web GUI**
-    *   Design the glassmorphism dashboard.
-    *   Create `face.js` supporting standard expressions (Happy, Curious, Sad, Sleeping, Listening) with smooth HTML5 Canvas animations.
-3.  **Phase 3: Wakeword & Speech integration**
-    *   Implement browser-based Web Speech recognition monitoring for *"Hey Rover"*.
-    *   Configure SocketIO triggers to pass questions to the Gemini API.
-4.  **Phase 4: Emotional State & Hardware Deployment**
-    *   Connect real HC-SR04 ultrasonic sensor routines.
-    *   Wire L298N drivers to Raspberry Pi and calibrate the duty cycles for accurate omnidirectional strafing.
+1.  **Phase 1-4 (V1): Locomotion, Web UI, Wake-word, Mood Engine**
+    *   *Complete.* Basic remote-controlled pet with Gemini TTS integration.
+2.  **Phase 5-6: Adaptive Emotional Engine & Initiatives**
+    *   *Complete.* Added Social Energy. Rover greets users when they walk in.
+3.  **Phase 7-8: Advanced Vision & Memory**
+    *   *Complete.* Added OpenCV Follow Mode, Object Detection, and SQLite Memory with Daily Summaries.
+4.  **Phase 9-10: Transparency & Automation**
+    *   *Complete.* Added live XAI Debug Feed and a 1-click Demonstration Mode script.

@@ -18,6 +18,8 @@ from src.hardware.motors import MecanumDriver
 from src.hardware.sensors import ProximitySensor
 from src.ai.voice_listener import VoiceListener
 from src.ai.aurus_brain import AURUSBrain
+from src.vision.vision_system import VisionSystem
+from src.vision.follow_controller import FollowController
 
 # Create Flask app and initialize SocketIO
 app = Flask(__name__)
@@ -27,12 +29,19 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 driver = MecanumDriver()
 sensor = ProximitySensor(driver)
 
+# Initialize vision system and controllers
+vision = VisionSystem()
+vision.start()
+follow_controller = FollowController()
+
 # Global Rover State
 state_lock = threading.Lock()
 rover_state = {
     "happiness": 0.5,
     "curiosity": 0.5,
-    "fear": 0.0,
+    "trust": 0.5,
+    "social_energy": 1.0,
+    "relationship_strength": 0.5,
     "expression": "happy",  # happy, sad, curious, sleeping, scared, listening
     "last_interaction": time.time(),
     "last_autonomous_action": time.time(),
@@ -100,11 +109,16 @@ def set_drive_mode(new_mode):
         rover_state["drive_mode"] = new_mode
         rover_state["last_interaction"] = time.time()
 
-        # 5. Activate autonomous thread if entering autonomous mode
+        # 5. Activate threads/controllers based on mode
         if new_mode == "autonomous":
             auto_run_event.set()
         elif new_mode == "voice_command":
             voice_burst_cancel.clear()  # Ready for new bursts
+            
+        if new_mode == "mode_follow":
+            follow_controller.set_active(True)
+        else:
+            follow_controller.set_active(False)
 
         print(f"[ModeManager] Drive mode changed: {old_mode} -> {new_mode}")
 
@@ -363,6 +377,42 @@ def autonomous_explore_loop():
 # Start autonomous exploration thread (begins paused)
 threading.Thread(target=autonomous_explore_loop, daemon=True).start()
 
+# --- Autonomous Follow Loop ---
+
+def follow_loop():
+    print("[FollowMode] Follow loop started (paused, waiting for activation).")
+    while True:
+        try:
+            time.sleep(0.1)
+            
+            with state_lock:
+                if rover_state["drive_mode"] != "mode_follow":
+                    continue
+
+            vision_data = vision.get_latest_data()
+            faces = vision_data["faces"]
+            sensor_data = sensor.read_all()
+            
+            motor_action = follow_controller.calculate_motor_command(faces, sensor_data)
+            
+            if motor_action == "forward":
+                driver.drive(0.4, 0, 0)
+            elif motor_action == "backward":
+                driver.drive(-0.4, 0, 0)
+            elif motor_action == "spin_left":
+                driver.drive(0, 0, -0.5)
+            elif motor_action == "spin_right":
+                driver.drive(0, 0, 0.5)
+            else:
+                driver.stop()
+                
+        except Exception as e:
+            print(f"[FollowMode] ERROR: {e}")
+            driver.stop()
+            time.sleep(0.5)
+
+threading.Thread(target=follow_loop, daemon=True).start()
+
 # Main interaction processing flow (handles speech and text inputs)
 def process_user_interaction(message):
     global gemini_configured, gemini_client
@@ -408,6 +458,17 @@ def process_user_interaction(message):
             "emotion": "listening", "action": "stop"
         })
         socketio.emit("audio_trigger", {"sound": "listening_beep"})
+        return
+    elif any(kw in text_lower for kw in ["follow me", "follow mode"]):
+        set_drive_mode("mode_follow")
+        with state_lock:
+            rover_state["expression"] = "curious"
+            rover_state["last_interaction"] = time.time()
+        socketio.emit("rover_reply", {
+            "speech": "Follow mode engaged! Lead the way!",
+            "emotion": "curious", "action": "stop"
+        })
+        socketio.emit("audio_trigger", {"sound": "happy_chirp"})
         return
 
     # --- Voice movement commands (only active in voice_command mode) ---
@@ -469,9 +530,14 @@ def process_user_interaction(message):
 
     # 1. Get sensor data for brain context
     sensor_data = sensor.read_all()
+    vision_data = vision.get_latest_data() if hasattr(vision, 'get_latest_data') else {}
+    sensor_data["objects"] = vision_data.get("objects", [])
 
     # 2. Think via AURUS Brain (handles Gemini + memory + fallback)
-    reply = brain.think(message, current_state, sensor_data)
+    if intent["type"] == "report" and intent.get("action") == "report_daily":
+        reply = brain.generate_daily_summary(current_state, sensor_data)
+    else:
+        reply = brain.think(message, current_state, sensor_data)
 
     speech = reply.get("speech", "Beep! Processing!")
     emotion = reply.get("emotion", "curious")
@@ -479,6 +545,15 @@ def process_user_interaction(message):
     inner_thought = reply.get("inner_thought", "")
 
     print(f"AURUS Brain: Speech='{speech}', Emotion='{emotion}', Action='{action}', Thought='{inner_thought}'")
+
+    # Broadcast Explainable AI Data
+    xai_data = reply.get("xai", {
+        "decision": f"Action: {action.upper()}",
+        "reason": "Default logic or local fallback",
+        "confidence": "100%",
+        "source_data": f"Input: {message}"
+    })
+    socketio.emit("xai_update", xai_data)
 
     # 3. Get high-quality native audio TTS from Google AI Studio
     # P0 #3: Use unique filename per interaction to prevent race conditions
@@ -541,6 +616,9 @@ def process_user_interaction(message):
     with state_lock:
         rover_state["expression"] = emotion
         rover_state["happiness"] = min(1.0, rover_state["happiness"] + config.INC_HAPPINESS_TALK)
+        rover_state["trust"] = min(1.0, rover_state.get("trust", 0.5) + config.INC_TRUST_POSITIVE)
+        rover_state["relationship_strength"] = min(1.0, rover_state.get("relationship_strength", 0.5) + config.INC_RELATIONSHIP_INTERACTION)
+        rover_state["social_energy"] = max(0.0, rover_state.get("social_energy", 1.0) - 0.05)
         rover_state["last_interaction"] = time.time()
 
     # 6. Broadcast to SocketIO clients
@@ -577,12 +655,16 @@ def mood_engine_loop():
     global rover_state
     
     print("Emotional Mood Engine running...")
+    previous_presence_state = "Absent"
     while True:
         try:
             time.sleep(1.0)
             
             # --- Phase 1: Read sensors OUTSIDE the lock (I/O operation) ---
             sensor_data = sensor.read_all()
+            vision_data = vision.get_latest_data() if hasattr(vision, 'get_latest_data') else {}
+            sensor_data["objects"] = vision_data.get("objects", [])
+            
             dist_fl = sensor_data["fl"]
             dist_f  = sensor_data["f"]
             dist_fr = sensor_data["fr"]
@@ -602,11 +684,8 @@ def mood_engine_loop():
             with state_lock:
                 current_drive_mode = rover_state["drive_mode"]
                 
-                # --- Fear Stimulus ---
-                # Only execute motor fear-responses in manual mode;
-                # autonomous and voice modes handle their own obstacle avoidance.
+                # --- Obstacle Reaction (No Fear State) ---
                 if dist_front_min < config.PROXIMITY_ALARM_CM:
-                    rover_state["fear"] = min(1.0, rover_state["fear"] + config.INC_FEAR_COLLISION)
                     rover_state["expression"] = "scared"
                     if current_drive_mode == "manual":
                         driver.shiver(0.8)
@@ -615,7 +694,6 @@ def mood_engine_loop():
                         driver.stop()
                     obstacle_reaction_needed = ("front", dist_front_min)
                 elif dist_rear_min < config.PROXIMITY_ALARM_CM:
-                    rover_state["fear"] = min(1.0, rover_state["fear"] + config.INC_FEAR_COLLISION)
                     rover_state["expression"] = "scared"
                     if current_drive_mode == "manual":
                         driver.shiver(0.8)
@@ -623,34 +701,49 @@ def mood_engine_loop():
                         time.sleep(0.4)
                         driver.stop()
                     obstacle_reaction_needed = ("rear", dist_rear_min)
-                else:
-                    # Decay fear when no obstacles detected
-                    rover_state["fear"] = max(0.0, rover_state["fear"] - config.DECAY_FEAR)
                 
                 # --- Curiosity Stimulus ---
                 if config.PROXIMITY_ALARM_CM <= dist_front_min < config.PROXIMITY_ALERT_CM:
                     rover_state["curiosity"] = min(1.0, rover_state["curiosity"] + config.INC_CURIOSITY_SENSOR)
                 
-                # --- Idle & Sleep Decay ---
+                # --- Initiative & Relationship Engine (Phase 5 & 6) ---
                 now = time.time()
                 idle_time = now - rover_state["last_interaction"]
+                current_presence = vision_data.get("presence_state", "Absent")
+                current_objects = vision_data.get("objects", [])
                 
-                # Only enter sleep if in manual mode (autonomous/voice are active states)
-                if idle_time > 120.0 and current_drive_mode == "manual":
+                # Initiative check (requires social energy)
+                initiative_needed = None
+                if rover_state.get("social_energy", 1.0) > 0.3 and current_drive_mode == "manual":
+                    # Greeting Initiative (User just entered frame)
+                    if current_presence == "Present" and previous_presence_state == "Absent":
+                        initiative_needed = "greeting"
+                        rover_state["last_interaction"] = now # Prevent immediate re-greeting
+                    
+                    # Check-in Initiative (User Present for a long time but ignoring robot)
+                    elif current_presence == "Present" and idle_time > 180.0:
+                        initiative_needed = "check-in"
+                        rover_state["last_interaction"] = now
+                        rover_state["trust"] = max(0.0, rover_state.get("trust", 0.5) - config.DEC_TRUST_IGNORED)
+                
+                previous_presence_state = current_presence
+                
+                # Recharge Social Energy while idle
+                if idle_time > 60.0:
+                    rover_state["social_energy"] = min(1.0, rover_state.get("social_energy", 0.0) + config.DECAY_SOCIAL_ENERGY)
+                
+                # --- Idle & Sleep Decay ---
+                if idle_time > 120.0 and current_drive_mode == "manual" and current_presence == "Absent":
                     rover_state["expression"] = "sleeping"
                     rover_state["happiness"] = max(0.1, rover_state["happiness"] - config.DECAY_HAPPINESS * 0.5)
                     rover_state["curiosity"] = max(0.1, rover_state["curiosity"] - config.DECAY_CURIOSITY * 0.5)
                 else:
-                    # Standard active updates when awake
-                    # Decays
                     rover_state["happiness"] = max(0.0, rover_state["happiness"] - config.DECAY_HAPPINESS)
                     rover_state["curiosity"] = max(0.0, rover_state["curiosity"] - config.DECAY_CURIOSITY)
                     
-                    # Update expressions based on moods (if not in listening/thinking state)
+                    # Update expressions based on moods
                     if rover_state["expression"] != "listening":
-                        if rover_state["fear"] > 0.6:
-                            rover_state["expression"] = "scared"
-                        elif rover_state["happiness"] > 0.7:
+                        if rover_state["happiness"] > 0.7:
                             rover_state["expression"] = "happy"
                         elif rover_state["curiosity"] > 0.6:
                             rover_state["expression"] = "curious"
@@ -675,8 +768,11 @@ def mood_engine_loop():
                 telemetry = {
                     "happiness": round(rover_state["happiness"], 2),
                     "curiosity": round(rover_state["curiosity"], 2),
-                    "fear": round(rover_state["fear"], 2),
+                    "trust": round(rover_state.get("trust", 0.5), 2),
+                    "social_energy": round(rover_state.get("social_energy", 1.0), 2),
+                    "relationship_strength": round(rover_state.get("relationship_strength", 0.5), 2),
                     "expression": rover_state["expression"],
+                    "objects": current_objects,
                     "dist_fl": dist_fl,
                     "dist_f": dist_f,
                     "dist_fr": dist_fr,
@@ -694,10 +790,12 @@ def mood_engine_loop():
                     "drive_mode": rover_state["drive_mode"]
                 }
                 
-                # Check if idle thought is needed (decision only, no API call)
+                # Check if standard idle thought is needed
                 idle_time_check = time.time() - rover_state.get("last_interaction", time.time())
-                if idle_time_check > 15.0 and current_drive_mode == "manual":
+                if idle_time_check > 45.0 and current_drive_mode == "manual" and not initiative_needed:
                     idle_thought_needed = True
+                    
+                if idle_thought_needed or initiative_needed:
                     state_snapshot = dict(rover_state)  # Snapshot for brain context
             
             # --- Phase 3: Emit telemetry OUTSIDE the lock ---
@@ -711,6 +809,16 @@ def mood_engine_loop():
             if obstacle_reaction_needed:
                 direction, distance = obstacle_reaction_needed
                 obs_reaction = brain.react_to_obstacle(direction, distance)
+                
+                # Broadcast XAI
+                xai_data = obs_reaction.get("xai", {
+                    "decision": f"Action: {obs_reaction.get('action', 'stop').upper()}",
+                    "reason": "Hardware safety override triggered",
+                    "confidence": "100%",
+                    "source_data": f"Proximity Alarm ({distance}cm at {direction})"
+                })
+                socketio.emit("xai_update", xai_data)
+
                 socketio.emit("rover_reply", {
                     "speech": obs_reaction["speech"],
                     "emotion": obs_reaction["emotion"],
@@ -719,15 +827,70 @@ def mood_engine_loop():
                 if obs_reaction.get("inner_thought"):
                     socketio.emit("inner_thought", {"thought": obs_reaction["inner_thought"]})
 
-            # AURUS Brain Idle Thoughts
-            if idle_thought_needed and state_snapshot:
-                thought = brain.generate_idle_thought(state_snapshot, sensor_data)
+            # AURUS Brain Initiatives & Idle Thoughts
+            if (idle_thought_needed or initiative_needed) and state_snapshot:
+                if initiative_needed:
+                    thought = brain.generate_initiative(initiative_needed, state_snapshot, sensor_data)
+                else:
+                    thought = brain.generate_idle_thought(state_snapshot, sensor_data)
+                    
                 if thought:
+                    # Broadcast XAI
+                    xai_data = thought.get("xai", {
+                        "decision": f"Topic: {initiative_needed or 'Idle Observation'}",
+                        "reason": "Social interaction decay timer",
+                        "confidence": "100%",
+                        "source_data": "Internal State + Presence History"
+                    })
+                    socketio.emit("xai_update", xai_data)
+
                     socketio.emit("idle_thought", {
                         "speech": thought["speech"],
                         "emotion": thought.get("emotion", "curious"),
                         "inner_thought": thought.get("inner_thought", "")
                     })
+                    
+                    # Get high-quality native audio TTS from Google AI Studio
+                    audio_file_path = f"initiative_{uuid.uuid4().hex[:8]}.wav"
+                    audio_generated = False
+                    if gemini_configured and gemini_client:
+                        try:
+                            tts_prompt = f"Read the following sentence aloud exactly as written: {thought['speech']}"
+                            tts_response = gemini_client.models.generate_content(
+                                model=config.GEMINI_MODEL,
+                                contents=tts_prompt,
+                                config=types.GenerateContentConfig(
+                                    response_modalities=["audio"],
+                                    speech_config=types.SpeechConfig(
+                                        voice_config=types.VoiceConfig(
+                                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                                voice_name=config.GEMINI_VOICE
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                            for part in tts_response.candidates[0].content.parts:
+                                if part.inline_data:
+                                    with open(audio_file_path, "wb") as f:
+                                        f.write(part.inline_data.data)
+                                    audio_generated = True
+                                    break
+                        except Exception as e:
+                            print(f"Failed to synthesize Gemini Audio for initiative: {e}")
+                            
+                    if audio_generated:
+                        play_audio_headless(audio_file_path)
+                        def _cleanup_audio(path):
+                            time.sleep(5.0)
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
+                        threading.Thread(target=_cleanup_audio, args=(audio_file_path,), daemon=True).start()
+                    else:
+                        socketio.emit("audio_trigger", {"sound": "happy_chirp"})
+                    
                     # Execute the idle action if any
                     action = thought.get("action", "stop")
                     if action != "stop":
@@ -815,6 +978,8 @@ def handle_feed_treat():
     """Feeds a virtual treat: increases happiness, triggers personality reaction"""
     with state_lock:
         rover_state["happiness"] = min(1.0, rover_state["happiness"] + config.INC_HAPPINESS_TREAT)
+        rover_state["trust"] = min(1.0, rover_state.get("trust", 0.5) + config.INC_TRUST_POSITIVE)
+        rover_state["relationship_strength"] = min(1.0, rover_state.get("relationship_strength", 0.5) + config.INC_RELATIONSHIP_INTERACTION)
         rover_state["expression"] = "happy"
         rover_state["last_interaction"] = time.time()
         
@@ -837,12 +1002,16 @@ def handle_reset_sim():
 
 @socketio.on("user_talk")
 def handle_user_talk(data):
-    """Processes typed commands from dashboard chat terminal"""
+    """Handles chat and web-mic speech interactions via SocketIO"""
     message = data.get("message", "").strip()
-    if not message:
-        return
-    
-    # Decouple AI generation into thread to prevent blocking WebSocket
-    threading.Thread(target=process_user_interaction, args=(message,), daemon=True).start()
+    if message:
+        # Pass to the standard AI pipeline
+        process_user_interaction(message)
 
-
+@socketio.on("demo_mock_presence")
+def handle_demo_mock_presence(data):
+    """Override vision presence state for demo sequence."""
+    state = data.get("state")
+    if hasattr(vision, 'set_mock_presence'):
+        vision.set_mock_presence(state)
+        print(f"[Demo] Set mock presence to: {state}")
