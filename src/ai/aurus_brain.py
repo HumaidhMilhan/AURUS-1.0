@@ -11,7 +11,7 @@ import json
 import time
 import random
 import traceback
-import config
+from src import config
 
 # --- THE SYSTEM PROMPT: AURUS Personality Core ---
 

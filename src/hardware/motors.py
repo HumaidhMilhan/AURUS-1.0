@@ -11,7 +11,7 @@ except ImportError:
     IS_SIMULATION = True
     GPIO = None
 
-import config
+from src import config
 
 class MecanumDriver:
     # Maximum time (seconds) motors can run without a new drive() call (P1 #7 watchdog)

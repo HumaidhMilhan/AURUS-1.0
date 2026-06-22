@@ -5,12 +5,12 @@ import time
 import sys
 import os
 
-# Adjust path if needed
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Adjust path to root directory
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import config
-from motors import MecanumDriver
-from sensors import ProximitySensor
+from src import config
+from src.hardware.motors import MecanumDriver
+from src.hardware.sensors import ProximitySensor
 
 class TestRoverLocomotion(unittest.TestCase):
     def setUp(self):
@@ -225,7 +225,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_local_fallback_greetings(self):
         """Verify local fallback brain returns structured responses for greetings."""
-        from aurus_brain import local_fallback_brain
+        from src.ai.aurus_brain import local_fallback_brain
         for keyword in ["hello", "hi", "hey", "greetings"]:
             result = local_fallback_brain(keyword)
             self.assertIn("speech", result)
@@ -236,7 +236,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_local_fallback_keywords(self):
         """Verify fallback brain matches various keyword categories."""
-        from aurus_brain import local_fallback_brain
+        from src.ai.aurus_brain import local_fallback_brain
         test_cases = {
             "trick": "happy",       # Tricks should be happy
             "dance": "happy",
@@ -252,14 +252,14 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_local_fallback_default(self):
         """Verify unknown inputs get a default response (not an error)."""
-        from aurus_brain import local_fallback_brain
+        from src.ai.aurus_brain import local_fallback_brain
         result = local_fallback_brain("xyzzy quantum flux capacitor")
         self.assertIn("speech", result)
         self.assertIn("emotion", result)
 
     def test_conversation_memory_add_and_trim(self):
         """Verify conversation memory stores and trims entries."""
-        from aurus_brain import ConversationMemory
+        from src.ai.aurus_brain import ConversationMemory
         mem = ConversationMemory(max_turns=3)
         for i in range(10):
             mem.add_user(f"msg {i}")
@@ -269,7 +269,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_conversation_memory_get_last_user(self):
         """Verify get_last_user_message returns the most recent user message."""
-        from aurus_brain import ConversationMemory
+        from src.ai.aurus_brain import ConversationMemory
         mem = ConversationMemory()
         mem.add_user("first")
         mem.add_model("reply1")
@@ -278,7 +278,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_conversation_memory_empty(self):
         """Verify empty memory returns appropriate defaults."""
-        from aurus_brain import ConversationMemory
+        from src.ai.aurus_brain import ConversationMemory
         mem = ConversationMemory()
         self.assertEqual(mem.get_turn_count(), 0)
         self.assertIsNone(mem.get_last_user_message())
@@ -286,7 +286,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_format_rover_state(self):
         """Verify state formatter produces expected output."""
-        from aurus_brain import format_rover_state
+        from src.ai.aurus_brain import format_rover_state
         state = {
             "happiness": 0.75, "curiosity": 0.5, "fear": 0.1,
             "expression": "happy", "drive_mode": "manual",
@@ -300,7 +300,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_brain_think_fallback(self):
         """Verify AURUSBrain.think() falls back to local brain when no Gemini client."""
-        from aurus_brain import AURUSBrain
+        from src.ai.aurus_brain import AURUSBrain
         brain = AURUSBrain(gemini_client=None)
         result = brain.think("hello", {"happiness": 0.5}, {"f": 100})
         self.assertIn("speech", result)
@@ -309,7 +309,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_brain_idle_thought_timing(self):
         """Verify idle thoughts respect the timing interval."""
-        from aurus_brain import AURUSBrain
+        from src.ai.aurus_brain import AURUSBrain
         brain = AURUSBrain(gemini_client=None)
         brain.last_idle_thought_time = time.time()  # Just generated one
         state = {"happiness": 0.5, "curiosity": 0.5, "last_interaction": time.time()}
@@ -320,7 +320,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_brain_obstacle_reaction(self):
         """Verify obstacle reactions return properly formatted responses."""
-        from aurus_brain import AURUSBrain
+        from src.ai.aurus_brain import AURUSBrain
         brain = AURUSBrain(gemini_client=None)
         result = brain.react_to_obstacle("front", 10)
         self.assertIn("speech", result)
@@ -329,7 +329,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_brain_treat_reaction(self):
         """Verify treat reactions return happy responses."""
-        from aurus_brain import AURUSBrain
+        from src.ai.aurus_brain import AURUSBrain
         brain = AURUSBrain(gemini_client=None)
         result = brain.react_to_treat()
         self.assertIn("speech", result)
@@ -337,7 +337,7 @@ class TestAURUSBrain(unittest.TestCase):
 
     def test_brain_memory_summary(self):
         """Verify memory summary provides correct metadata."""
-        from aurus_brain import AURUSBrain
+        from src.ai.aurus_brain import AURUSBrain
         brain = AURUSBrain(gemini_client=None)
         brain.think("hello", {"happiness": 0.5}, {"f": 100})
         summary = brain.get_memory_summary()

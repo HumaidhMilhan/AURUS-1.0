@@ -13,11 +13,11 @@ from flask_socketio import SocketIO, emit  # noqa: F811 - emit used in handlers
 from google import genai
 from google.genai import types
 
-import config
-from motors import MecanumDriver
-from sensors import ProximitySensor
-from voice_listener import VoiceListener
-from aurus_brain import AURUSBrain
+from src import config
+from src.hardware.motors import MecanumDriver
+from src.hardware.sensors import ProximitySensor
+from src.ai.voice_listener import VoiceListener
+from src.ai.aurus_brain import AURUSBrain
 
 # Create Flask app and initialize SocketIO
 app = Flask(__name__)
@@ -116,7 +116,7 @@ def set_drive_mode(new_mode):
 # local_rover_brain has been moved to aurus_brain.py as local_fallback_brain()
 # Kept as a thin redirect for backward compatibility with tests
 def local_rover_brain(user_text):
-    from aurus_brain import local_fallback_brain
+    from src.ai.aurus_brain import local_fallback_brain
     return local_fallback_brain(user_text)
 
 # Motor action executor for expanded brain action vocabulary
@@ -845,11 +845,4 @@ def handle_user_talk(data):
     # Decouple AI generation into thread to prevent blocking WebSocket
     threading.Thread(target=process_user_interaction, args=(message,), daemon=True).start()
 
-if __name__ == "__main__":
-    try:
-        socketio.run(app, host="0.0.0.0", port=5000, debug=False)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        voice_listener.stop()
-        driver.cleanup()
+

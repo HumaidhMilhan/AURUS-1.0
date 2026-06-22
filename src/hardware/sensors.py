@@ -2,7 +2,7 @@ import time
 import math
 import random
 import statistics
-import config
+from src import config
 
 # Try importing RPi.GPIO
 try:

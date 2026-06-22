@@ -22,7 +22,7 @@ except ImportError:
     HAS_SR = False
     sr = None
 
-import config
+from src import config
 
 class VoiceListener:
     def __init__(self, on_command_callback):
